@@ -1,5 +1,5 @@
 altair
-matplotlib-inline
+matplotlib
 numpy
 pandas
 PyMySQL
