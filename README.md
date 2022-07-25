@@ -1,7 +1,10 @@
 # ENGETO_Data_Academy_Python_project
 Final project for Data Academy in Python
 
-## How to run:
+## How to run on streamlit:
+https://andreadvorakova-engeto-data-academy-python-proj-main-app-mta5i6.streamlitapp.com/
+
+## How to run on local:
 
 * Open cmd in given folder, create virtualenv (virtualenv venv), then activate the virtualenv (venv\Scripts\activate)
 * pip install -r requirements.txt
