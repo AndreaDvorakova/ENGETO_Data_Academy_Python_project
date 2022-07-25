@@ -5,7 +5,6 @@ pandas
 PyMySQL
 SQLAlchemy
 plotly
-PIL
 h3
 datetime
 Pillow
