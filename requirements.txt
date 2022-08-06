@@ -8,3 +8,6 @@ plotly
 h3
 datetime
 Pillow
+folium
+streamlit_folium
+scipy
