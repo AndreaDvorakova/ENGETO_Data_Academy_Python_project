@@ -10,14 +10,26 @@ import plotly
 from PIL import Image
 import h3
 import datetime
+import folium
+from folium import plugins
+from streamlit_folium import folium_static
+from scipy.spatial.distance import squareform, pdist
 
-#conection engine do databaze
-conn_string = "mysql+pymysql://student2:eh2BjVEpYmDcT96E@data.engeto.com:3306/data_academy_02_2022"
-engine = sqlalchemy.create_engine(conn_string)
 
 #nacteni dat do dataframu
-df_bikes = pd.read_sql('SELECT * FROM edinburgh_bikes', engine)
-df_weather = pd.read_sql('SELECT * FROM edinburgh_weather', engine)
+url_bikes = 'https://drive.google.com/file/d/1qATDvXPt396kR6Hj9xl1QyHUawSO0AYM/view?usp=sharing'
+url_weather = 'https://drive.google.com/file/d/1blUV2i0dbvVeMsprR_ZsbEeeCln6W7fq/view?usp=sharing'
+path_bikes = 'https://drive.google.com/uc?id=' + url_bikes.split('/')[-2]
+path_weather = 'https://drive.google.com/uc?id=' + url_weather.split('/')[-2]
+df_bikes = pd.read_csv(path_bikes, delimiter=',', decimal=',')
+df_weather = pd.read_csv(path_weather, delimiter=',', decimal=',')
+
+#kontrola prazdnych hodnot, identifikovane sloupce nelze pouzit pro vypocty jen pro zobrazeni
+columns_null_bikes = df_bikes.columns[df_bikes.isnull().any()].tolist()
+columns_null_weather = df_weather.columns[df_weather.isnull().any()].tolist()
+
+#df_bikes = pd.read_sql('SELECT * FROM edinburgh_bikes', engine)
+#df_weather = pd.read_sql('SELECT * FROM edinburgh_weather', engine)
 
 #cisteni dat od preklepu
 df_bikes['start_station_name'] = df_bikes['start_station_name'].replace({
@@ -54,6 +66,7 @@ page = st.sidebar.selectbox('Choose your interests', ('Home', 'Standard descript
 
 #uvodni informace
 if page == 'Home':
+
     link = '[GitHub](https://github.com/AndreaDvorakova/ENGETO_Data_Academy_Python_project.git)'
     st.markdown("<span style='text-align: center; color: black;'>In Edinburgh, as in other cities, the bike sharing system works - there are stations with bikes in the city, you can borrow one and then return it at another station. The problem is that in some stations bikes regularly accumulate and in others they are missing. The bike operator, Just Eat Cycles, has commissioned a project to make the system more efficient.</span>", unsafe_allow_html=True)
     st.markdown("<span style='text-align: center; color: black;'>Feel free to explore all the subpages and if you are interested in the code, visit the link:</span>", unsafe_allow_html=True)
@@ -64,7 +77,7 @@ if page == 'Home':
 
 #prvni stranka obsahujici standardni descriptivni statistiku    
 elif page == 'Standard description':
-    subpage = st.sidebar.radio('Subpage', ['Number of rented/returned bikes', 'Most/least busy station', 'Potential surplus/shortage', 'Distance between stations', 'Rental duration'])
+    subpage = st.sidebar.radio('Subpage', ['Basic data', 'Number of rented/returned bikes', 'Most/least busy station', 'Potential surplus/shortage overall', 'Potential surplus/shortage by days', 'Distance between stations', 'Rental duration'])
 
     #dataframe pro secteni pujcek podle start_station_id
     df_start = (df_bikes
@@ -78,18 +91,98 @@ elif page == 'Standard description':
 
     #dataframe pro secteni pujcek podle end_station_id
     df_end = (df_bikes
-                [['end_station_id', 'end_station_name']]
-                .set_index(['end_station_id', 'end_station_name'])
-                .rename_axis(['station_id', 'end_station_name']))
+                [['end_station_id', 'end_station_name', 'end_station_latitude', 'end_station_longitude']]
+                .set_index(['end_station_id', 'end_station_name', 'end_station_latitude', 'end_station_longitude'])
+                .rename_axis(['station_id', 'end_station_name', 'station_latitude', 'station_longitude']))
 
     df_end = df_end.reset_index()
-    df_end = df_end.groupby(['station_id', 'end_station_name']).size().reset_index(name='count_end')
+    df_end = df_end.groupby(['station_id', 'end_station_name', 'station_latitude', 'station_longitude']).size().reset_index(name='count_end')
         
     #spojeni dvou dataframu
-    df_activity = df_end[['station_id', 'end_station_name','count_end']].join(df_start[['count_start']], rsuffix ='_start')
+    df_activity = df_end[['station_id', 'end_station_name','count_end', 'station_latitude', 'station_longitude']].join(df_start[['count_start']], rsuffix ='_start')
+    if subpage == 'Basic data':
+        
+        #uvodni komentar
+        st.markdown("<span style='text-align: center; color: black;'>The following table represents the average rentals and returns for each station.</span>", unsafe_allow_html=True)
+        #uprava datumu do formatu datetime
+        df_bikes['started_at'] = pd.to_datetime(df_bikes['started_at'], format='%Y-%m-%d %H:%M', utc=True, errors='coerce')
+        df_bikes['ended_at'] = pd.to_datetime(df_bikes['ended_at'], format='%Y-%m-%d %H:%M', utc=True, errors='coerce')
+        df_bikes['new_date_start'] = df_bikes['started_at'].dt.date
+        df_bikes['new_date_end'] = df_bikes['ended_at'].dt.date
+        #castecna databaze pro dalsi vypocty
+        df_dscrp_base = df_bikes[['start_station_id', 'new_date_start', 'end_station_id', 'new_date_end']]
+        df_dscrp_base['counting_column'] = 1
+        #vypocet: pocet unikatnich dnu za kazdou stanici a suma vypujcek/vratek za kazdou stanici
+        df_dscrp_start_1 = df_dscrp_base.groupby(['start_station_id', 'new_date_start']).count()
+        df_dscrp_end_1 = df_dscrp_base.groupby(['end_station_id', 'new_date_end']).count()
+        df_dscrp_start_1 = df_dscrp_start_1.reset_index()
+        df_dscrp_end_1 = df_dscrp_end_1.reset_index()
+        df_dscrp_start_2 = df_dscrp_start_1.groupby('start_station_id')['new_date_start'].count()
+        df_dscrp_end_2 = df_dscrp_end_1.groupby('end_station_id')['new_date_end'].count()
+        df_dscrp_start_2 = df_dscrp_start_2.reset_index()
+        df_dscrp_end_2 = df_dscrp_end_2.reset_index()
+        df_dscrp_start_3 = df_dscrp_start_1.groupby('start_station_id')['counting_column'].sum()
+        df_dscrp_end_3 = df_dscrp_end_1.groupby('end_station_id')['counting_column'].sum()
+        df_dscrp_start_3 = df_dscrp_start_3.reset_index()
+        df_dscrp_end_3 = df_dscrp_end_3.reset_index()
+        #spojeni pomocnych databazi
+        df_final = df_dscrp_start_2.join(df_dscrp_start_3.join(df_dscrp_end_2.join(df_dscrp_end_3, rsuffix = '_e3'), rsuffix = '_e2'), rsuffix = '_s3')
+        #prejmenovani sloupcu
+        df_final = df_final[['start_station_id', 'new_date_start', 'counting_column', 'new_date_end', 'counting_column_e2']].rename(columns={
+            'start_station_id':'Station ID', 
+            'new_date_start': 'Count of date per start station', 
+            'counting_column': 'Sum of rentals per station', 
+            'new_date_end' : 'Count of date per end station', 
+            'counting_column_e2' : 'Sum of returns per station'
+        })
+        #vypocet prumernych dennich vypujcek/vratek
+        df_final['Avg start'] = df_final['Sum of rentals per station']/df_final['Count of date per start station']
+        df_final['Avg end'] = df_final['Sum of returns per station']/df_final['Count of date per end station']
+        c0, c00, c000 = st.columns((1,2,1))
+        c00.write(df_final)
+        #komentar k druhe tabulce
+        st.markdown("<span style='text-align: center; color: black;'>The following table represents min/max and average duration of rental for each station.</span>", unsafe_allow_html=True)
+        df_duration_basic = df_bikes[['start_station_id', 'new_date_start', 'duration']]
+        df_duration_basic = df_duration_basic.groupby(['start_station_id', 'new_date_start']).agg({'duration':['min', 'max', 'mean']})
+        c0, c00, c000 = st.columns((1,2,1))
+        c00.write(df_duration_basic)
+        #komentar ke treti tabulce
+        st.markdown("<span style='text-align: center; color: black;'>The following table represents data from describe function.</span>", unsafe_allow_html=True)
+        st.write(df_bikes.describe())
+
 
     if subpage == 'Number of rented/returned bikes':
-
+        #vyber dat pro 10 nejaktivnejsich stanic z hlediska vratek a 10 nejaktivnejsich pro pujcky
+        max_10_end = df_activity[['station_id', 'end_station_name', 'count_end', 'station_latitude', 'station_longitude']].sort_values(by='count_end', ascending=False).iloc[0:10]
+        max_10_start = df_activity[['station_id', 'end_station_name', 'count_start', 'station_latitude', 'station_longitude']].sort_values(by='count_start', ascending=False).iloc[0:10]
+        #tvorba mapy a zoom na Edinburgh
+        m = folium.Map()
+        m = folium.Map(location=[55.953251, -3.188267], zoom_start=12)
+        for city, row in max_10_start.iterrows():
+            folium.Marker(row[['station_latitude', 'station_longitude']].values.tolist(), 
+                        popup=folium.Popup(f"""
+                        Station ID: {row['station_id']} <br>
+                        Count: {row['count_start']} <br>
+                        Lat: {row['station_latitude']} <br>
+                        Long: {row['station_longitude']} 
+                        """),
+                        icon=folium.Icon(color='green', icon="bicycle", prefix='fa')
+                        ).add_to(m)
+        for city, row in max_10_end.iterrows():
+            folium.Marker(row[['station_latitude', 'station_longitude']].values.tolist(), 
+                        popup=folium.Popup(f"""
+                        Station ID: {row['station_id']} <br>
+                        Count: {row['count_end']} <br>
+                        Lat: {row['station_latitude']} <br>
+                        Long: {row['station_longitude']} 
+                        """),
+                        icon=folium.Icon(color='red', icon="bicycle", prefix='fa')
+                        ).add_to(m)
+        #komentar k mape
+        st.markdown("<span style='text-align: center; color: black;'>The map is showing us the 10 most frequented stations for rentals (green) and returns (red).</span>", unsafe_allow_html=True)              
+        folium_static(m)       
+               
+        #komentar k barchartu
         st.markdown("<span style='text-align: center; color: black;'>Let's look into some basics about our data. The two graphs below shoving us the overall sum of rentals/returns in each station. The graphs are interactive, so feel free to look more into the detail, as on the high-level view there is too much difference between the extreme values. By clicking on columns you get the specific information about the sum of rentals/returns.</span>", unsafe_allow_html=True)              
         
         #tvorba grafu z start a end dat
@@ -153,7 +246,7 @@ elif page == 'Standard description':
         st.write(df_activity) 
 
 
-    elif subpage == 'Potential surplus/shortage':
+    elif subpage == 'Potential surplus/shortage overall':
         #uvodni komentar 
         st.markdown("<span style='text-align: center; color: black;'>With difference between the returns and the rentals I would like to demonstrate the station with potential surplus or shortage.</span>", unsafe_allow_html=True)
         
@@ -179,15 +272,41 @@ elif page == 'Standard description':
         st.markdown("<span style='text-align: center; color: black;'>The data for each station is represented in the table below.</span>", unsafe_allow_html=True)
         st.write(df_activity)
 
+    elif subpage == 'Potential surplus/shortage by days':
+        #uvodni komentar
+        st.markdown("<span style='text-align: center; color: black;'>Rentals and returns by date in each station. Potential shortage is in stations where the difference is below zero. Data are sorted by difference.</span>", unsafe_allow_html=True)
+    
+        df_bikes['started_at'] = pd.to_datetime(df_bikes['started_at'], format='%Y-%m-%d %H:%M', utc=True, errors='coerce')
+        df_bikes['ended_at'] = pd.to_datetime(df_bikes['ended_at'], format='%Y-%m-%d %H:%M', utc=True, errors='coerce')
+        df_bikes['new_date_start'] = df_bikes['started_at'].dt.date
+        df_bikes['new_date_end'] = df_bikes['ended_at'].dt.date
+
+        df_rental = df_bikes.groupby(['start_station_id', 'new_date_start'])['new_date_start'].count()
+        df_return = df_bikes.groupby(['end_station_id', 'new_date_end'])['new_date_end'].count()
+
+        df_diff_day = pd.concat([df_rental, df_return], axis=1) 
+        df_diff_day['diff_day'] = df_diff_day['new_date_start'] - df_diff_day['new_date_end'] 
+        df_diff_day = df_diff_day.sort_values(by='diff_day')
+        df_diff_day = df_diff_day[df_diff_day['diff_day'].notna()]
+        df_diff_day = df_diff_day.rename(columns={'new_date_start':'Count rental',
+                                                'new_date_end':'Count return'})
+        c0, c00, c000 = st.columns((1,2,1))
+        c00.write(df_diff_day)
+
     elif subpage == 'Distance between stations':
         st.markdown("<h2 style='text-align: center; color: grey;'>Distances between the start and end station</h2>", unsafe_allow_html=True)
         #uvodni komentar
-        st.markdown("<span style='text-align: center; color: black;'>The data for each station is represented in the table below, the distances between the stations is in the last column.</span>", unsafe_allow_html=True)
+        st.markdown("<span style='text-align: center; color: black;'>The table is representing the distance matrix between stations.</span>", unsafe_allow_html=True)
+        
         #vypocet vzdalenosti mezi start a end station
-        coords = df_bikes[['start_station_latitude', 'start_station_longitude', 'end_station_latitude', 'end_station_longitude']]
-        df_bikes['distance_btw_stations'] = df_bikes.apply(lambda row: h3.point_dist((row['start_station_latitude'], row['start_station_longitude']),(row['end_station_latitude'], row['end_station_longitude'])), axis=1)
-        st.write(df_bikes)
+        #coords = df_bikes[['start_station_latitude', 'start_station_longitude', 'end_station_latitude', 'end_station_longitude']]
+        #df_bikes['distance_btw_stations'] = df_bikes.apply(lambda row: h3.point_dist((row['start_station_latitude'], row['start_station_longitude']),(row['end_station_latitude'], row['end_station_longitude'])), axis=1)
+        #st.write(df_bikes)
 
+        df_station = df_bikes[['start_station_name', 'start_station_latitude', 'start_station_longitude']]
+        df_station = df_station.drop_duplicates(subset=['start_station_name'])
+        df_distance_matrix = pd.DataFrame(squareform(pdist(df_station.iloc[:, 1:])), columns=df_station.start_station_name.unique(), index=df_station.start_station_name.unique())
+        st.write(df_distance_matrix)
 
     elif subpage == 'Rental duration':
         #uvodni komentar
@@ -250,6 +369,21 @@ elif page == 'Standard description':
                         ).interactive()
 
         st.altair_chart(duration_chart, use_container_width=True)  
+
+        #komentar k histogramu
+        st.markdown("<span style='text-align: center; color: black;'>The data from duration are represented in the histogram below. First the data were cleaned from outlier values.</span>", unsafe_allow_html=True)
+        
+        #zbaveni se odlehlycg hodnot v duration
+        q_low = df_bikes["duration"].quantile(0.01)
+        q_hi  = df_bikes["duration"].quantile(0.99)
+        df_filtered = df_bikes[(df_bikes["duration"] < q_hi) & (df_bikes["duration"] > q_low)]
+        df_filtered['duration'].describe()
+        #zobrazeni grafu
+        df_filtered_duration = df_filtered['duration']
+        fig, ax = plt.subplots()
+        df_filtered_duration.hist()
+        plt.show()
+        st.pyplot(fig)
  
 
 elif page == 'Analysis':
@@ -306,23 +440,6 @@ elif page == 'Analysis':
         ).interactive().add_selection(selection)
         st.altair_chart(month_chart, use_container_width=True)
 
-        #komentar k dalsimu grafu o dnech
-        st.markdown("<span style='text-align: center; color: black;'>Also the day in the week seems to have an effect on the demand. Weekends are more busy than the working days.</span>", unsafe_allow_html=True)
-        
-        #tvorba dataframe pro zobrazeni v grafu
-        df_week_days = df_bikes.groupby(['year','day_in_week']).count()['index']
-        df_week_days = df_week_days.reset_index()
-
-        #graf - poptavka ve dnech
-        week_chart = alt.Chart(df_week_days).mark_bar().encode(
-                    x=alt.X('day_in_week', title='Day in week'),
-                    y=alt.Y('index', title='Sum of records'),
-                    color='year',
-                    tooltip=[alt.Tooltip('day_in_week', title='Day:'), 
-                        alt.Tooltip('index', title='Sum.of records:')]
-                    ).properties(title='Demand in weekdays')
-        st.altair_chart(week_chart, use_container_width=True)
-
         #komentar k dalsimu grafu o hodinach
         st.markdown("<span style='text-align: center; color: black;'>In working days the first peek of renting is between 6AM and 8AM which could be caused by the fact that people are renting bikes to get to their work. The second peek is probably caused by the trip back home from work as it is around 3PM and 5PM. During the weekends the rise of demand is more constant and it stagnates at midday and drops after 3PM.</span>", unsafe_allow_html=True)
                 
@@ -342,6 +459,19 @@ elif page == 'Analysis':
                     opacity = alt.condition(selection, alt.value(1), alt.value(0.2))
                     ).properties(title="Demand in hours").interactive().add_selection(selection)
         st.altair_chart(day_chart, use_container_width=True)
+
+        #komentar k tabulce o predpokladanem zacatku provozu stanic
+        st.markdown("<span style='text-align: center; color: black;'>From the table below we could see the earliest rental/return date for each station. We can assumption that stations with higher ID started to operate later. It also probably means that more bikes started to operate.</span>", unsafe_allow_html=True)
+
+        df_bikes['started_at'] = pd.to_datetime(df_bikes['started_at'], format='%Y-%m-%d %H:%M', utc=True, errors='coerce')
+        df_bikes['ended_at'] = pd.to_datetime(df_bikes['ended_at'], format='%Y-%m-%d %H:%M', utc=True, errors='coerce')
+        df_bikes['new_date_start'] = df_bikes['started_at'].dt.date
+        df_bikes['new_date_end'] = df_bikes['ended_at'].dt.date
+
+        min_date_start =  df_bikes.groupby('start_station_id')['new_date_start'].min()
+        min_date_end = df_bikes.groupby('end_station_id')['new_date_end'].min()
+        min_date_all = pd.concat([min_date_start, min_date_end], axis=1)
+        st.write(min_date_all)
         
     elif section == 'Weather vs demand':
 
