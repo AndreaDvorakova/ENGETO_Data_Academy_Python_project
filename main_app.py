@@ -14,6 +14,10 @@ import folium
 from folium import plugins
 from streamlit_folium import folium_static
 from scipy.spatial.distance import squareform, pdist
+from scipy.spatial.distance import squareform
+
+from scipy.spatial import distance
+
 
 
 #nacteni dat do dataframu
@@ -77,7 +81,7 @@ if page == 'Home':
 
 #prvni stranka obsahujici standardni descriptivni statistiku    
 elif page == 'Standard description':
-    subpage = st.sidebar.radio('Subpage', ['Basic data', 'Number of rented/returned bikes', 'Most/least busy station', 'Potential surplus/shortage overall', 'Potential surplus/shortage by days', 'Distance between stations', 'Rental duration'])
+    subpage = st.sidebar.radio('Subpage', ['Basic data', 'Number of rented/returned bikes', 'Most/least busy station', 'Potential surplus/shortage overall', 'Potential surplus/shortage by days', 'Rental duration'])
 
     #dataframe pro secteni pujcek podle start_station_id
     df_start = (df_bikes
@@ -293,20 +297,21 @@ elif page == 'Standard description':
         c0, c00, c000 = st.columns((1,2,1))
         c00.write(df_diff_day)
 
-    elif subpage == 'Distance between stations':
-        st.markdown("<h2 style='text-align: center; color: grey;'>Distances between the start and end station</h2>", unsafe_allow_html=True)
+    #elif subpage == 'Distance between stations':
+        #st.markdown("<h2 style='text-align: center; color: grey;'>Distances between the start and end station</h2>", unsafe_allow_html=True)
         #uvodni komentar
-        st.markdown("<span style='text-align: center; color: black;'>The table is representing the distance matrix between stations.</span>", unsafe_allow_html=True)
+        #st.markdown("<span style='text-align: center; color: black;'>The table is representing the distance matrix between stations.</span>", unsafe_allow_html=True)
         
         #vypocet vzdalenosti mezi start a end station
         #coords = df_bikes[['start_station_latitude', 'start_station_longitude', 'end_station_latitude', 'end_station_longitude']]
         #df_bikes['distance_btw_stations'] = df_bikes.apply(lambda row: h3.point_dist((row['start_station_latitude'], row['start_station_longitude']),(row['end_station_latitude'], row['end_station_longitude'])), axis=1)
         #st.write(df_bikes)
 
-        df_station = df_bikes[['start_station_name', 'start_station_latitude', 'start_station_longitude']]
-        df_station = df_station.drop_duplicates(subset=['start_station_name'])
-        df_distance_matrix = pd.DataFrame(squareform(pdist(df_station.iloc[:, 1:])), columns=df_station.start_station_name.unique(), index=df_station.start_station_name.unique())
-        st.write(df_distance_matrix)
+        #df_station = df_bikes[['start_station_name', 'start_station_latitude', 'start_station_longitude']]
+        #df_station = df_station.drop_duplicates(subset=['start_station_name'])
+        #df_distance_matrix = pd.DataFrame(squareform(pdist(df_station.iloc[:, 1:])), columns=df_station.start_station_name.unique(), index=df_station.start_station_name.unique())
+        #st.write(df_distance_matrix)
+        #st.write(df_matrix)
 
     elif subpage == 'Rental duration':
         #uvodni komentar
